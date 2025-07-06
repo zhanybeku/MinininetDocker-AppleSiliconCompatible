@@ -1,0 +1,20 @@
+# Docker and container files
+.docker/
+*.log
+
+# Project files (user should decide what to track)
+projects/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary files
+*.tmp
+*.temp
