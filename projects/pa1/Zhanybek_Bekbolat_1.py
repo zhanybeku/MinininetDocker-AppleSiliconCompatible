@@ -3,8 +3,6 @@ from mininet.node import Controller, OVSSwitch, RemoteController
 from mininet.cli import CLI
 from mininet.log import setLogLevel, info
 
-import subprocess
-
 def install_flow_rules(net):
   h1_ip = net.get('h1').IP()
   h2_ip = net.get('h2').IP()
