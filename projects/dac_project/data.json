@@ -1,0 +1,31 @@
+{
+  "floodlight_controller_url": "http://localhost:8080",
+  "protocols": {
+    "SSH": {"id": "6", "port": "22", "name": "SSH", "description": "Remote management of servers/switches"},
+    "RDP": {"id": "6", "port": "3389", "name": "RDP", "description": "Windows remote access"},
+    "FTP": {"id": "6", "port": "21", "name": "FTP", "description": "File transfer"},
+    "HTTP": {"id": "6", "port": "80", "name": "HTTP", "description": "Web access"},
+    "HTTPS": {"id": "6", "port": "443", "name": "HTTPS", "description": "Secure web access"}
+  },
+  "roles": {
+    "admin": {
+      "allowed_protocols": ["SSH", "RDP", "FTP", "HTTP", "HTTPS", "DNS", "SMTP", "SNMP", "NTP"],
+      "restricted_protocols": [],
+      "blocked_protocols": []
+    },
+    "employee": {
+      "allowed_protocols": ["HTTP", "HTTPS", "DNS", "SMTP", "NTP"],
+      "restricted_protocols": ["FTP"],
+      "blocked_protocols": ["SSH", "RDP", "SNMP", "Telnet"]
+    },
+    "guest": {
+      "allowed_protocols": ["HTTP", "HTTPS", "DNS", "NTP"],
+      "restricted_protocols": [],
+      "blocked_protocols": ["SSH", "RDP", "FTP", "SMTP", "SNMP", "Telnet"]
+    }
+  },
+  "time_policies": {
+    "business_hours": {"start": 8, "end": 18},
+    "time_blocked_protocols": ["SSH", "RDP", "FTP", "Telnet"]
+  }
+}
