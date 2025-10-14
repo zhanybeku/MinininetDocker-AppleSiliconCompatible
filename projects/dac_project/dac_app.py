@@ -93,7 +93,8 @@ def install_blocking_rules():
 def remove_blocking_rules():
     try:
         response = requests.get(
-            f'{FLOODLIGHT_CONTROLLER_URL}/wm/acl/clear/json') # I NEED TO SPECIFY WHICH RULES TO CLEAR HERE!
+            # I NEED TO SPECIFY WHICH RULES TO CLEAR HERE!
+            f'{FLOODLIGHT_CONTROLLER_URL}/wm/acl/clear/json')
 
         if response.status_code == 200:
             with state_lock:
@@ -110,8 +111,18 @@ def remove_blocking_rules():
 def time_based_policy():
     while True:
         try:
+            # Adjust for timezone offset from config
+            utc_offset = config.get('utc_timezone', 0)
             now = datetime.now()
-            if ALLOWED_TIME_RANGE[0] <= now.hour < ALLOWED_TIME_RANGE[1]:
+            adjusted_hour = (now.hour + utc_offset) % 24
+
+            print(
+                f"[Policy] Current time: {adjusted_hour:02d}:{now.minute:02d}:{now.second:02d}")
+            print(
+                f"[Policy] Business hours: {ALLOWED_TIME_RANGE[0]}:00 - {ALLOWED_TIME_RANGE[1]}:00")
+            print(f"[Policy] UTC offset: {utc_offset} hours")
+
+            if ALLOWED_TIME_RANGE[0] <= adjusted_hour < ALLOWED_TIME_RANGE[1]:
                 print("[Policy] Access allowed")
                 if (states["blocking_rules_active"]):
                     remove_blocking_rules()
@@ -125,10 +136,88 @@ def time_based_policy():
             time.sleep(60)
 
 
+# User analytics thread function:
+def user_analytics():
+    while True:
+        try:
+            print("\n[Analytics] Gathering switch statistics...")
+
+            switches_response = requests.get(
+                f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/controller/switches/json')
+
+            if switches_response.status_code == 200:
+                switches = switches_response.json()
+                print(f"[Analytics] Found {len(switches)} connected switches:")
+
+                for switch in switches:
+                    switch_id = switch['switchDPID']
+                    print(f"  Switch: {switch_id}")
+
+                    # Get port statistics for this switch
+                    port_url = f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/port/json'
+                    port_response = requests.get(port_url)
+
+                    if port_response.status_code == 200:
+                        port_data = port_response.json()
+                        ports = port_data.get('port_reply', [{}])[
+                            0].get('port', [])
+
+                        total_packets = 0
+                        total_bytes = 0
+                        active_ports = 0
+
+                        for port in ports:
+                            if port.get('port_number') != 'local':
+                                rx_packets = int(
+                                    port.get('receive_packets', 0))
+                                tx_packets = int(
+                                    port.get('transmit_packets', 0))
+                                rx_bytes = int(port.get('receive_bytes', 0))
+                                tx_bytes = int(port.get('transmit_bytes', 0))
+
+                                if rx_packets > 0 or tx_packets > 0:
+                                    active_ports += 1
+                                    total_packets += rx_packets + tx_packets
+                                    total_bytes += rx_bytes + tx_bytes
+
+                        print(f"    Active ports: {active_ports}")
+                        print(f"    Total packets: {total_packets}")
+                        print(f"    Total bytes: {total_bytes:,}")
+
+                    flow_response = requests.get(
+                        f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/flow/json')
+
+                    if flow_response.status_code == 200:
+                        flow_data = flow_response.json()
+                        flows = flow_data.get('flows', [])
+                        print(f"    Active flows: {len(flows)}")
+                    else:
+                        print(f"    Flow stats: Not available")
+
+            devices_response = requests.get(
+                f'{FLOODLIGHT_CONTROLLER_URL}/wm/device/')
+            if devices_response.status_code == 200:
+                devices_data = devices_response.json()
+                devices = devices_data.get('devices', [])
+                print(f"[Analytics] Active devices: {len(devices)}")
+
+            time.sleep(30)
+
+        except Exception as e:
+            print(f"[Analytics] Error: {e}")
+            time.sleep(30)
+
+
 def main():
     # Start the time-based policy thread:
-    thread = threading.Thread(target=time_based_policy, daemon=True)
-    thread.start()
+    time_based_policy_thread = threading.Thread(
+        target=time_based_policy, daemon=True)
+    time_based_policy_thread.start()
+
+    # Start the user analytics thread:
+    user_analytics_thread = threading.Thread(
+        target=user_analytics, daemon=True)
+    user_analytics_thread.start()
 
     while True:
         print("Main app running...")
