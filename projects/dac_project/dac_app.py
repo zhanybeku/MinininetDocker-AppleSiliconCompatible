@@ -125,10 +125,11 @@ def time_based_policy():
             time.sleep(60)
 
 
+# Main function:
 def main():
     # Start the time-based policy thread:
-    thread = threading.Thread(target=time_based_policy, daemon=True)
-    thread.start()
+    time_thread = threading.Thread(target=time_based_policy, daemon=True)
+    time_thread.start()
 
     while True:
         print("Main app running...")
