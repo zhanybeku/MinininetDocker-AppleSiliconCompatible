@@ -4,14 +4,14 @@
 # - Not sure if we need to name the controllers with the block numbers specified or just starting from 1 is okay...
 
 from mininet.net import Mininet
-from mininet.node import OVSSwitch, OVSController
+from mininet.node import OVSSwitch, RemoteController
 from mininet.cli import CLI
 from mininet.log import setLogLevel, info
 
 
 def topo():
     info("Creating network...\n")
-    net = Mininet(controller=OVSController, switch=OVSSwitch)
+    net = Mininet(controller=None, switch=OVSSwitch)
 
     num_blocks = 5
     switches_per_block = 3
@@ -24,7 +24,11 @@ def topo():
     host_objects = {}
 
     info("Adding controllers...\n")
-    controller_objects = [net.addController(f"c{i + 1}") for i in range(num_blocks)]
+    controller_ports = [6653, 6654, 6655, 6656, 6657]
+    controller_objects = [
+        net.addController(RemoteController(f"c{i + 1}", ip='127.0.0.1', port=controller_ports[i]))
+        for i in range(num_blocks)
+    ]
     
     for block_idx, controller in enumerate(controller_objects):
         block_switches = []
@@ -50,28 +54,20 @@ def topo():
         hosts_by_block.append(block_hosts)
 
     info("Adding links...\n")
-    # Connect switches within each block (fully connected mesh)
     for block_switches in switches_by_block:
         for i in range(len(block_switches)):
             for j in range(i + 1, len(block_switches)):
                 net.addLink(block_switches[i], block_switches[j])
     
-    # Connect hosts to switches in their block
-    # Distribute hosts across switches in the block
     for block_idx, (block_switches, block_hosts) in enumerate(zip(switches_by_block, hosts_by_block)):
         for host_idx, host_obj in enumerate(block_hosts):
             switch_idx = host_idx % len(block_switches)
             net.addLink(host_obj, block_switches[switch_idx])
     
-    # Connect adjacent blocks with single links
     for block_idx in range(num_blocks - 1):
         switch_from = switches_by_block[block_idx][0]
         switch_to = switches_by_block[block_idx + 1][0]
         net.addLink(switch_from, switch_to)
-
-    info("Starting controllers...\n")
-    for controller in controller_objects:
-        controller.start()
 
     info("Starting network...\n")
     net.start()
@@ -79,6 +75,19 @@ def topo():
     info("Assigning controllers to switches...\n")
     for switch_name, controller_list in controller_map.items():
         switch_objects[switch_name].start(controller_list)
+
+    info("Enabling STP on switches to prevent broadcast storms...\n")
+    for switch_name, switch_obj in switch_objects.items():
+        cmd = f"ovs-vsctl set Bridge {switch_name} stp_enable=true"
+        switch_obj.cmd(cmd)
+        info(f"  STP enabled on {switch_name}\n")
+    
+    import time
+    info("Waiting for STP and controller learning to complete...\n")
+    for i in range(10, 0, -1):
+        info(f"  {i}... ")
+        time.sleep(1)
+    info("\nNetwork should be ready now!\n")
 
     CLI(net)
 

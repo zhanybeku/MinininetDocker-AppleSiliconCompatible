@@ -1,48 +1,38 @@
-from mininet.net import Mininet
-from mininet.node import OVSSwitch, OVSController
-from mininet.cli import CLI
+from mn_wifi.net import Mininet_wifi
+from mn_wifi.node import Station, OVSKernelAP
+from mn_wifi.cli import CLI
 from mininet.log import setLogLevel, info
 
-def topo():
-    info("Creating network...\n")
-    net = Mininet(controller=OVSController, switch=OVSSwitch)
-
-    info("Adding controllers...\n")
-    controller = net.addController("c1")
-
-    info("Adding switches...\n")
-    switch1 = net.addSwitch("s1")
-    switch2 = net.addSwitch("s2")
-    switch3 = net.addSwitch("s3")
-
-    info("Adding links...\n")
-    net.addLink(switch1, switch2)
-    net.addLink(switch1, switch3)
-    net.addLink(switch2, switch3)
-
-    info("Adding hosts...\n")
-    host1 = net.addHost("h1")
-    host2 = net.addHost("h2")
-    host3 = net.addHost("h3")
-
-    info("Adding links...\n")
-    net.addLink(host1, switch1)
-    net.addLink(host2, switch2)
-    net.addLink(host3, switch3)
-
-    info("Assigning controllers to switches...\n")
-    switch1.start([controller])
-    switch2.start([controller])
-    switch3.start([controller])
-
-    info("Starting network...\n")
-    net.start()
-
+def simpleTest():
+    "Create a simple wireless network"
+    net = Mininet_wifi()
+    
+    info("*** Creating nodes\n")
+    sta1 = net.addStation('sta1', ip='10.0.0.1/24')
+    sta2 = net.addStation('sta2', ip='10.0.0.2/24')
+    ap1 = net.addAccessPoint('ap1', ssid='test-ssid', mode='g', channel='1')
+    
+    info("*** Configuring wifi nodes\n")
+    net.configureWifiNodes()
+    
+    info("*** Creating links\n")
+    net.addLink(sta1, ap1)
+    net.addLink(sta2, ap1)
+    
+    info("*** Starting network\n")
+    net.build()
+    ap1.start([])
+    
+    info("*** Associating stations\n")
+    sta1.setAssociation(ap1)
+    sta2.setAssociation(ap1)
+    
+    info("*** Running CLI\n")
     CLI(net)
-
-    info("Stopping network...\n")
+    
+    info("*** Stopping network\n")
     net.stop()
 
-if __name__ == "__main__":
-    setLogLevel("info")
-    topo()
+if __name__ == '__main__':
+    setLogLevel('info')
+    simpleTest()
