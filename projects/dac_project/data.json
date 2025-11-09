@@ -1,5 +1,7 @@
 {
   "floodlight_controller_url": "http://localhost:8080",
+  "floodlight_controller_ip": "127.0.0.1",
+  "floodlight_controller_port": 6653,
   "utc_timezone": 5,
   "protocols": {
     "SSH": {"id": "6", "port": "22", "name": "SSH", "description": "Remote management of servers/switches"},

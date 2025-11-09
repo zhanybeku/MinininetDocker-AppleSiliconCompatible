@@ -1,62 +1,92 @@
 [
   {
-    "ip": "192.168.1.15",
-    "role": "admin",
-    "hostname": "admin-server-01",
-    "description": "Primary admin server"
-  },
-  {
-    "ip": "10.0.2.45",
-    "role": "employee",
-    "hostname": "workstation-03",
-    "description": "Employee workstation"
-  },
-  {
-    "ip": "172.16.0.128",
+    "ip": "10.0.0.1",
     "role": "guest",
-    "hostname": "guest-wifi-device",
-    "description": "Guest network device"
+    "hostname": "default",
+    "description": ""
   },
   {
-    "ip": "192.168.1.200",
-    "role": "admin",
-    "hostname": "backup-server",
-    "description": "Backup admin server"
-  },
-  {
-    "ip": "10.0.2.78",
-    "role": "employee",
-    "hostname": "laptop-employee-12",
-    "description": "Employee laptop"
-  },
-  {
-    "ip": "172.16.0.55",
+    "ip": "10.0.0.10",
     "role": "guest",
-    "hostname": "visitor-tablet",
-    "description": "Visitor tablet device"
+    "hostname": "default",
+    "description": ""
   },
   {
-    "ip": "192.168.1.33",
-    "role": "employee",
-    "hostname": "printer-office",
-    "description": "Office printer"
-  },
-  {
-    "ip": "10.0.2.156",
-    "role": "admin",
-    "hostname": "monitoring-server",
-    "description": "Network monitoring server"
-  },
-  {
-    "ip": "172.16.0.201",
+    "ip": "10.0.0.11",
     "role": "guest",
-    "hostname": "smartphone-guest",
-    "description": "Guest smartphone"
+    "hostname": "default",
+    "description": ""
   },
   {
-    "ip": "192.168.1.89",
-    "role": "employee",
-    "hostname": "desktop-finance",
-    "description": "Finance department desktop"
+    "ip": "10.0.0.12",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.13",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.14",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.15",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.2",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.3",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.4",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.5",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.6",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.7",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.8",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
+  },
+  {
+    "ip": "10.0.0.9",
+    "role": "guest",
+    "hostname": "default",
+    "description": ""
   }
 ]

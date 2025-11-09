@@ -153,7 +153,7 @@ def user_analytics():
                     switch_id = switch['switchDPID']
                     print(f"  Switch: {switch_id}")
 
-                    # Get port statistics for this switch
+                    # Get port statistics for this switch:
                     port_url = f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/port/json'
                     port_response = requests.get(port_url)
 
@@ -192,7 +192,7 @@ def user_analytics():
                         flows = flow_data.get('flows', [])
                         print(f"    Active flows: {len(flows)}")
                     else:
-                        print(f"    Flow stats: Not available")
+                        print("    Flow stats: Not available")
 
             devices_response = requests.get(
                 f'{FLOODLIGHT_CONTROLLER_URL}/wm/device/')
