@@ -206,6 +206,9 @@ def user_analytics():
         except Exception as e:
             print(f"[Analytics] Error: {e}")
             time.sleep(30)
+            
+def topo():
+  pass
 
 
 # Main function:
