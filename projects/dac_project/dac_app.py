@@ -16,6 +16,27 @@ def load_config():
 config = load_config()
 
 
+# Load users from JSON file:
+def load_users():
+    users_path = os.path.join(os.path.dirname(__file__), 'users.json')
+    with open(users_path, 'r') as f:
+        return json.load(f)
+
+
+# Create IP to role mapping:
+def create_ip_to_role_map():
+    users = load_users()
+    return {user['ip']: user['role'] for user in users}
+
+
+# Get protocol name from port number:
+def get_protocol_by_port(port):
+    for protocol_name, protocol_info in config['protocols'].items():
+        if str(protocol_info['port']) == str(port):
+            return protocol_name
+    return None
+
+
 # Get time-blocked protocols from config
 def get_time_blocked_protocols():
     blocked_protocol_names = config['time_policies']['time_blocked_protocols']
@@ -42,6 +63,9 @@ FLOODLIGHT_CONTROLLER_URL = config['floodlight_controller_url']
 ALLOWED_TIME_RANGE = [config['time_policies']['business_hours']['start'],
                       config['time_policies']['business_hours']['end']]
 TIME_BLOCKED_PROTOCOLS = get_time_blocked_protocols()
+IP_TO_ROLE = create_ip_to_role_map()
+TRAFFIC_THRESHOLDS = config.get('monitoring', {}).get('traffic_thresholds', {})
+MONITORING_INTERVAL = config.get('monitoring', {}).get('check_interval_seconds', 30)
 
 
 # States:
@@ -49,6 +73,40 @@ states = {
     "blocking_rules_active": False
 }
 state_lock = threading.Lock()
+
+# Traffic tracking for suspicious activity detection:
+user_traffic_history = {}  # {ip: {'bytes': [], 'packets': [], 'timestamps': [], 'last_check': timestamp}}
+traffic_lock = threading.Lock()
+
+
+# Load traffic history from JSON file:
+def load_traffic_history():
+    global user_traffic_history
+    history_path = os.path.join(os.path.dirname(__file__), 'history.json')
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, 'r') as f:
+                user_traffic_history = json.load(f)
+                print(f"[History] Loaded traffic history for {len(user_traffic_history)} users")
+        except Exception as e:
+            print(f"[History] Error loading history: {e}")
+            user_traffic_history = {}
+
+
+# Save traffic history to JSON file:
+# Note: Should be called from within traffic_lock context to ensure thread safety
+def save_traffic_history():
+    history_path = os.path.join(os.path.dirname(__file__), 'history.json')
+    try:
+        # Note: Assumes traffic_lock is already held by caller
+        with open(history_path, 'w') as f:
+            json.dump(user_traffic_history, f, indent=2)
+    except Exception as e:
+        print(f"[History] Error saving history: {e}")
+
+
+# Load history on startup:
+load_traffic_history()
 
 
 # Install blocking rules:
@@ -208,6 +266,146 @@ def user_analytics():
             time.sleep(30)
 
 
+# Suspicious activity monitoring function:
+def suspicious_activity_monitor():
+    global user_traffic_history
+    
+    while True:
+        try:
+            print("\n[Security] Checking for suspicious activity...")
+            
+            # Get all switches to analyze flows
+            switches_response = requests.get(
+                f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/controller/switches/json')
+            
+            if switches_response.status_code != 200:
+                time.sleep(MONITORING_INTERVAL)
+                continue
+                
+            switches = switches_response.json()
+            
+            # Track current traffic per user
+            current_traffic = {}  # {ip: {'bytes': 0, 'packets': 0, 'protocols': set()}}
+            
+            # Analyze flows from all switches
+            for switch in switches:
+                switch_id = switch['switchDPID']
+                flow_response = requests.get(
+                    f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/flow/json')
+                
+                if flow_response.status_code == 200:
+                    flow_data = flow_response.json()
+                    flows = flow_data.get('flows', [])
+                    
+                    for flow in flows:
+                        match = flow.get('match', {})
+                        src_ip = match.get('nw-src', '')
+                        dst_port = match.get('tp-dst', '')
+                        byte_count = int(flow.get('byteCount', 0))
+                        packet_count = int(flow.get('packetCount', 0))
+                        
+                        # Skip if no source IP
+                        if not src_ip or src_ip == '0.0.0.0/0':
+                            continue
+                            
+                        # Extract IP from CIDR if needed
+                        if '/' in src_ip:
+                            src_ip = src_ip.split('/')[0]
+                        
+                        # Initialize tracking for this IP
+                        if src_ip not in current_traffic:
+                            current_traffic[src_ip] = {'bytes': 0, 'packets': 0, 'protocols': set()}
+                        
+                        # Add traffic
+                        current_traffic[src_ip]['bytes'] += byte_count
+                        current_traffic[src_ip]['packets'] += packet_count
+                        
+                        # Detect protocol from destination port
+                        if dst_port:
+                            protocol = get_protocol_by_port(dst_port)
+                            if protocol:
+                                current_traffic[src_ip]['protocols'].add(protocol)
+            
+            # Check each user for suspicious activity
+            current_time = time.time()
+            
+            with traffic_lock:
+                for ip, traffic_data in current_traffic.items():
+                    user_role = IP_TO_ROLE.get(ip, 'unknown')
+                    
+                    # Initialize history if needed
+                    if ip not in user_traffic_history:
+                        user_traffic_history[ip] = {
+                            'bytes': [],
+                            'packets': [],
+                            'timestamps': [],
+                            'last_check': current_time
+                        }
+                    
+                    history = user_traffic_history[ip]
+                    time_diff = current_time - history['last_check']
+                    
+                    # Calculate per-minute rates
+                    if time_diff > 0:
+                        bytes_per_minute = (traffic_data['bytes'] / time_diff) * 60
+                        packets_per_minute = (traffic_data['packets'] / time_diff) * 60
+                        
+                        # Check traffic thresholds
+                        bytes_threshold = TRAFFIC_THRESHOLDS.get('bytes_per_minute', 10485760)  # 10MB default
+                        packets_threshold = TRAFFIC_THRESHOLDS.get('packets_per_minute', 10000)
+                        
+                        if bytes_per_minute > bytes_threshold:
+                            print(f"⚠️  [SECURITY ALERT] User {ip} (role: {user_role}) exceeded traffic threshold!")
+                            print(f"   Bytes/min: {bytes_per_minute:,.0f} (threshold: {bytes_threshold:,})")
+                        
+                        if packets_per_minute > packets_threshold:
+                            print(f"⚠️  [SECURITY ALERT] User {ip} (role: {user_role}) exceeded packet threshold!")
+                            print(f"   Packets/min: {packets_per_minute:,.0f} (threshold: {packets_threshold:,})")
+                        
+                        # Check protocol violations
+                        if user_role != 'unknown':
+                            role_config = get_role_protocols(user_role)
+                            allowed_protocols = set(role_config.get('allowed_protocols', []))
+                            blocked_protocols = set(role_config.get('blocked_protocols', []))
+                            
+                            used_protocols = traffic_data['protocols']
+                            
+                            # Check for blocked protocols
+                            blocked_used = used_protocols.intersection(blocked_protocols)
+                            if blocked_used:
+                                print(f"🚨 [SECURITY ALERT] User {ip} (role: {user_role}) using BLOCKED protocols: {', '.join(blocked_used)}")
+                            
+                            # Check for unauthorized protocols (not in allowed list)
+                            unauthorized = used_protocols - allowed_protocols - blocked_protocols
+                            # Filter out common system protocols that might not be in config
+                            common_system = {'DNS', 'NTP', 'DHCP', 'ARP'}
+                            unauthorized = unauthorized - common_system
+                            
+                            if unauthorized:
+                                print(f"⚠️  [SECURITY WARNING] User {ip} (role: {user_role}) using unauthorized protocols: {', '.join(unauthorized)}")
+                        
+                        # Update history
+                        history['bytes'].append(bytes_per_minute)
+                        history['packets'].append(packets_per_minute)
+                        history['timestamps'].append(current_time)
+                        history['last_check'] = current_time
+                        
+                        # Keep only last 10 measurements
+                        if len(history['bytes']) > 10:
+                            history['bytes'] = history['bytes'][-10:]
+                            history['packets'] = history['packets'][-10:]
+                            history['timestamps'] = history['timestamps'][-10:]
+                
+                # Save history to file after processing all users
+                save_traffic_history()
+            
+            time.sleep(MONITORING_INTERVAL)
+            
+        except Exception as e:
+            print(f"[Security] Error in suspicious activity monitor: {e}")
+            time.sleep(MONITORING_INTERVAL)
+
+
 # Main function:
 def main():
     # Start the time-based policy thread:
@@ -219,6 +417,11 @@ def main():
     user_analytics_thread = threading.Thread(
         target=user_analytics, daemon=True)
     user_analytics_thread.start()
+
+    # Start the suspicious activity monitoring thread:
+    security_monitor_thread = threading.Thread(
+        target=suspicious_activity_monitor, daemon=True)
+    security_monitor_thread.start()
 
     while True:
         print("Main app running...")

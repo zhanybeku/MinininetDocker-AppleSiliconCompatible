@@ -30,5 +30,13 @@
   "time_policies": {
     "business_hours": {"start": 8, "end": 18},
     "time_blocked_protocols": ["SSH", "RDP", "FTP", "Telnet"]
+  },
+  "monitoring": {
+    "traffic_thresholds": {
+      "bytes_per_minute": 10485760,
+      "packets_per_minute": 10000,
+      "alert_on_exceed": true
+    },
+    "check_interval_seconds": 30
   }
 }
