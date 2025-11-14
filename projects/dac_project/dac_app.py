@@ -3,6 +3,7 @@ import threading
 import time
 import json
 import os
+import queue
 from datetime import datetime
 
 # Load configuration from JSON file:
@@ -77,6 +78,13 @@ state_lock = threading.Lock()
 # Traffic tracking for suspicious activity detection:
 user_traffic_history = {}  # {ip: {'bytes': [], 'packets': [], 'timestamps': [], 'last_check': timestamp}}
 traffic_lock = threading.Lock()
+
+# Queue for suspicious activity alerts (thread-safe communication):
+suspicious_activity_queue = queue.Queue()
+
+# Track blocked IPs to avoid duplicate blocking:
+blocked_ips = set()
+blocked_ips_lock = threading.Lock()
 
 
 # Load traffic history from JSON file:
@@ -163,6 +171,62 @@ def remove_blocking_rules():
 
     except Exception as e:
         print(f"[Policy] Error clearing ACL rules: {e}")
+
+
+# Block a specific IP address:
+def block_ip_address(ip_address):
+    """Block all traffic from a specific IP address using ACL rules."""
+    try:
+        # Block all traffic from this IP
+        acl_rule = {
+            "src-ip": f"{ip_address}/32",
+            "dst-ip": "0.0.0.0/0",
+            "action": "DENY"
+        }
+
+        response = requests.post(f'{FLOODLIGHT_CONTROLLER_URL}/wm/acl/rules/json',
+                                 json=acl_rule,
+                                 headers={'Content-Type': 'application/json'})
+
+        if response.status_code == 200:
+            with blocked_ips_lock:
+                blocked_ips.add(ip_address)
+            print(f"[Security] Successfully blocked IP address: {ip_address}")
+            return True
+        else:
+            print(f"[Security] Failed to block IP {ip_address}: {response.text}")
+            return False
+
+    except Exception as e:
+        print(f"[Security] Error blocking IP {ip_address}: {e}")
+        return False
+
+
+# Unblock a specific IP address:
+def unblock_ip_address(ip_address):
+    """Unblock a previously blocked IP address by clearing relevant ACL rules."""
+    try:
+        # Note: This clears all ACL rules, which may affect other rules
+        # A more sophisticated implementation would track and remove specific rules
+        response = requests.get(f'{FLOODLIGHT_CONTROLLER_URL}/wm/acl/clear/json')
+
+        if response.status_code == 200:
+            with blocked_ips_lock:
+                if ip_address in blocked_ips:
+                    blocked_ips.remove(ip_address)
+            print(f"[Security] Unblocked IP address: {ip_address}")
+            # Reinstall time-based blocking rules if they were active
+            with state_lock:
+                if states["blocking_rules_active"]:
+                    install_blocking_rules()
+            return True
+        else:
+            print(f"[Security] Failed to unblock IP {ip_address}: {response.text}")
+            return False
+
+    except Exception as e:
+        print(f"[Security] Error unblocking IP {ip_address}: {e}")
+        return False
 
 
 # Time-based policy thread function:
@@ -328,6 +392,7 @@ def suspicious_activity_monitor():
             
             # Check each user for suspicious activity
             current_time = time.time()
+            suspicious_ips = []  # Collect all suspicious IPs in this check cycle
             
             with traffic_lock:
                 for ip, traffic_data in current_traffic.items():
@@ -354,13 +419,17 @@ def suspicious_activity_monitor():
                         bytes_threshold = TRAFFIC_THRESHOLDS.get('bytes_per_minute', 10485760)  # 10MB default
                         packets_threshold = TRAFFIC_THRESHOLDS.get('packets_per_minute', 10000)
                         
+                        # Collect suspicious activity details
+                        suspicious_reasons = []
+                        severity = "warning"
+                        
                         if bytes_per_minute > bytes_threshold:
-                            print(f"⚠️  [SECURITY ALERT] User {ip} (role: {user_role}) exceeded traffic threshold!")
-                            print(f"   Bytes/min: {bytes_per_minute:,.0f} (threshold: {bytes_threshold:,})")
+                            suspicious_reasons.append(f"Exceeded traffic threshold: {bytes_per_minute:,.0f} bytes/min (threshold: {bytes_threshold:,})")
+                            severity = "alert"
                         
                         if packets_per_minute > packets_threshold:
-                            print(f"⚠️  [SECURITY ALERT] User {ip} (role: {user_role}) exceeded packet threshold!")
-                            print(f"   Packets/min: {packets_per_minute:,.0f} (threshold: {packets_threshold:,})")
+                            suspicious_reasons.append(f"Exceeded packet threshold: {packets_per_minute:,.0f} packets/min (threshold: {packets_threshold:,})")
+                            severity = "alert"
                         
                         # Check protocol violations
                         if user_role != 'unknown':
@@ -373,7 +442,8 @@ def suspicious_activity_monitor():
                             # Check for blocked protocols
                             blocked_used = used_protocols.intersection(blocked_protocols)
                             if blocked_used:
-                                print(f"🚨 [SECURITY ALERT] User {ip} (role: {user_role}) using BLOCKED protocols: {', '.join(blocked_used)}")
+                                suspicious_reasons.append(f"Using BLOCKED protocols: {', '.join(blocked_used)}")
+                                severity = "critical"
                             
                             # Check for unauthorized protocols (not in allowed list)
                             unauthorized = used_protocols - allowed_protocols - blocked_protocols
@@ -382,7 +452,24 @@ def suspicious_activity_monitor():
                             unauthorized = unauthorized - common_system
                             
                             if unauthorized:
-                                print(f"⚠️  [SECURITY WARNING] User {ip} (role: {user_role}) using unauthorized protocols: {', '.join(unauthorized)}")
+                                suspicious_reasons.append(f"Using unauthorized protocols: {', '.join(unauthorized)}")
+                                if severity != "critical":
+                                    severity = "warning"
+                        
+                        # If suspicious activity detected, queue it for user interaction
+                        if suspicious_reasons:
+                            # Check if IP is already blocked to avoid duplicate alerts
+                            with blocked_ips_lock:
+                                if ip not in blocked_ips:
+                                    suspicious_ips.append({
+                                        'ip': ip,
+                                        'role': user_role,
+                                        'reasons': suspicious_reasons,
+                                        'severity': severity,
+                                        'bytes_per_minute': bytes_per_minute,
+                                        'packets_per_minute': packets_per_minute,
+                                        'protocols': list(used_protocols) if user_role != 'unknown' else []
+                                    })
                         
                         # Update history
                         history['bytes'].append(bytes_per_minute)
@@ -399,11 +486,101 @@ def suspicious_activity_monitor():
                 # Save history to file after processing all users
                 save_traffic_history()
             
+            # Queue suspicious IPs for user interaction (outside the lock to avoid blocking)
+            for suspicious_ip_info in suspicious_ips:
+                try:
+                    suspicious_activity_queue.put(suspicious_ip_info, block=False)
+                except queue.Full:
+                    # Queue is full, skip this alert (shouldn't happen with unbounded queue)
+                    pass
+            
             time.sleep(MONITORING_INTERVAL)
             
         except Exception as e:
             print(f"[Security] Error in suspicious activity monitor: {e}")
             time.sleep(MONITORING_INTERVAL)
+
+
+# Handle suspicious activity interactively:
+def handle_suspicious_activity(activity_info):
+    """Present user with options to handle suspicious activity."""
+    ip = activity_info['ip']
+    role = activity_info['role']
+    reasons = activity_info['reasons']
+    severity = activity_info['severity']
+    bytes_per_min = activity_info.get('bytes_per_minute', 0)
+    packets_per_min = activity_info.get('packets_per_minute', 0)
+    protocols = activity_info.get('protocols', [])
+    
+    # Display alert based on severity
+    if severity == "critical":
+        print("\n" + "="*70)
+        print("🚨 CRITICAL SECURITY ALERT 🚨")
+        print("="*70)
+    elif severity == "alert":
+        print("\n" + "="*70)
+        print("⚠️  SECURITY ALERT ⚠️")
+        print("="*70)
+    else:
+        print("\n" + "="*70)
+        print("⚠️  SECURITY WARNING ⚠️")
+        print("="*70)
+    
+    print("\nSuspicious activity detected from:")
+    print(f"  IP Address: {ip}")
+    print(f"  Role: {role}")
+    print("\nDetails:")
+    for reason in reasons:
+        print(f"  • {reason}")
+    
+    if bytes_per_min > 0:
+        print(f"  • Traffic rate: {bytes_per_min:,.0f} bytes/min, {packets_per_min:,.0f} packets/min")
+    if protocols:
+        print(f"  • Protocols used: {', '.join(protocols)}")
+    
+    print("\n" + "-"*70)
+    print("Options:")
+    print("  1. Block this IP address (deny all traffic)")
+    print("  2. Ignore this alert (continue monitoring)")
+    print("  3. View more details")
+    print("-"*70)
+    
+    while True:
+        try:
+            choice = input("\nEnter your choice (1-3): ").strip()
+            
+            if choice == '1':
+                if block_ip_address(ip):
+                    print(f"\n✓ IP address {ip} has been blocked.")
+                    print("All traffic from this IP will be denied.")
+                else:
+                    print(f"\n✗ Failed to block IP address {ip}.")
+                break
+            elif choice == '2':
+                print(f"\n✓ Alert ignored. Continuing to monitor {ip}...")
+                break
+            elif choice == '3':
+                print(f"\nAdditional details for {ip}:")
+                print(f"  Role configuration: {role}")
+                if role != 'unknown':
+                    role_config = get_role_protocols(role)
+                    print(f"  Allowed protocols: {', '.join(role_config.get('allowed_protocols', []))}")
+                    print(f"  Blocked protocols: {', '.join(role_config.get('blocked_protocols', []))}")
+                print(f"  Current traffic: {bytes_per_min:,.0f} bytes/min, {packets_per_min:,.0f} packets/min")
+                print("\nReturning to options...")
+                print("-"*70)
+                print("Options:")
+                print("  1. Block this IP address (deny all traffic)")
+                print("  2. Ignore this alert (continue monitoring)")
+                print("  3. View more details")
+                print("-"*70)
+            else:
+                print("Invalid choice. Please enter 1, 2, or 3.")
+        except (EOFError, KeyboardInterrupt):
+            print("\n\nInterrupted. Ignoring this alert and continuing...")
+            break
+    
+    print("="*70 + "\n")
 
 
 # Main function:
@@ -423,9 +600,31 @@ def main():
         target=suspicious_activity_monitor, daemon=True)
     security_monitor_thread.start()
 
-    while True:
-        print("Main app running...")
-        time.sleep(10)
+    print("[Main] Application started. Monitoring for suspicious activity...")
+    print("[Main] Press Ctrl+C to exit gracefully.\n")
+
+    try:
+        while True:
+            # Check for suspicious activity alerts (non-blocking)
+            try:
+                activity_info = suspicious_activity_queue.get(block=False)
+                # Pause monitoring and handle the alert interactively
+                handle_suspicious_activity(activity_info)
+            except queue.Empty:
+                # No alerts, continue normal operation
+                pass
+            
+            # Small sleep to prevent busy-waiting
+            time.sleep(1)
+            
+    except KeyboardInterrupt:
+        print("\n[Shutdown] Received interrupt signal, shutting down gracefully...")
+        # Save traffic history one last time before exit
+        with traffic_lock:
+            save_traffic_history()
+        print("[Shutdown] Traffic history saved.")
+        print("[Shutdown] Goodbye!")
+        # Daemon threads will automatically terminate when main thread exits
 
 
 if __name__ == "__main__":
