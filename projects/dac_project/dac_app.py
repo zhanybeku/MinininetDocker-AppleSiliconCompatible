@@ -262,72 +262,148 @@ def time_based_policy():
 def user_analytics():
     while True:
         try:
-            print("\n[Analytics] Gathering switch statistics...")
+            print("\n[Analytics] Gathering device statistics...")
 
+            # Get current device traffic using the same method as security monitoring
+            device_traffic = get_device_traffic_snapshot()
+            
+            if device_traffic:
+                print(f"[Analytics] Found {len(device_traffic)} active devices:")
+                
+                # Sort devices by traffic (most active first)
+                sorted_devices = sorted(device_traffic.items(), 
+                                      key=lambda x: x[1]['packets'], reverse=True)
+                
+                for ip, stats in sorted_devices:
+                    role = IP_TO_ROLE.get(ip, 'unknown')
+                    packets = stats['packets']
+                    bytes_count = stats['bytes']
+                    
+                    # Show activity indicator (adjusted for realistic thresholds)
+                    if packets > 1000:
+                        activity = "🔥 HIGH"
+                    elif packets > 500:
+                        activity = "📊 MED"
+                    elif packets > 50:
+                        activity = "💤 LOW"
+                    else:
+                        activity = "⚫ IDLE"
+                    
+                    print(f"  {ip:<12} ({role:<8}): {packets:>6} packets, {bytes_count:>8,} bytes {activity}")
+                
+                # Summary statistics
+                total_devices = len(device_traffic)
+                active_devices = sum(1 for stats in device_traffic.values() if stats['packets'] > 0)
+                total_packets = sum(stats['packets'] for stats in device_traffic.values())
+                total_bytes = sum(stats['bytes'] for stats in device_traffic.values())
+                
+                print(f"[Analytics] Summary: {active_devices}/{total_devices} devices active, "
+                      f"{total_packets:,} total packets, {total_bytes:,} total bytes")
+            else:
+                print("[Analytics] No device traffic data available")
+
+            # Still show basic switch count for context
             switches_response = requests.get(
                 f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/controller/switches/json')
-
             if switches_response.status_code == 200:
                 switches = switches_response.json()
-                print(f"[Analytics] Found {len(switches)} connected switches:")
-
-                for switch in switches:
-                    switch_id = switch['switchDPID']
-                    print(f"  Switch: {switch_id}")
-
-                    # Get port statistics for this switch:
-                    port_url = f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/port/json'
-                    port_response = requests.get(port_url)
-
-                    if port_response.status_code == 200:
-                        port_data = port_response.json()
-                        ports = port_data.get('port_reply', [{}])[
-                            0].get('port', [])
-
-                        total_packets = 0
-                        total_bytes = 0
-                        active_ports = 0
-
-                        for port in ports:
-                            if port.get('port_number') != 'local':
-                                rx_packets = int(
-                                    port.get('receive_packets', 0))
-                                tx_packets = int(
-                                    port.get('transmit_packets', 0))
-                                rx_bytes = int(port.get('receive_bytes', 0))
-                                tx_bytes = int(port.get('transmit_bytes', 0))
-
-                                if rx_packets > 0 or tx_packets > 0:
-                                    active_ports += 1
-                                    total_packets += rx_packets + tx_packets
-                                    total_bytes += rx_bytes + tx_bytes
-
-                        print(f"    Active ports: {active_ports}")
-                        print(f"    Total packets: {total_packets}")
-                        print(f"    Total bytes: {total_bytes:,}")
-
-                    flow_response = requests.get(
-                        f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/flow/json')
-
-                    if flow_response.status_code == 200:
-                        flow_data = flow_response.json()
-                        flows = flow_data.get('flows', [])
-                        print(f"    Active flows: {len(flows)}")
-                    else:
-                        print("    Flow stats: Not available")
-
-            devices_response = requests.get(
-                f'{FLOODLIGHT_CONTROLLER_URL}/wm/device/')
-            if devices_response.status_code == 200:
-                devices_data = devices_response.json()
-                devices = devices_data.get('devices', [])
-                print(f"[Analytics] Active devices: {len(devices)}")
+                print(f"[Analytics] Network: {len(switches)} switches connected")
 
             time.sleep(30)
 
         except Exception as e:
             print(f"[Analytics] Error: {e}")
             time.sleep(30)
+
+
+# Get current traffic statistics for all devices using port-based approach (fixed version)
+def get_device_traffic_snapshot():
+    """Get current traffic statistics for all devices - measures traffic generated BY hosts (RX from switch perspective)"""
+    
+    # Get devices and their attachment points
+    devices_response = requests.get(f'{FLOODLIGHT_CONTROLLER_URL}/wm/device/')
+    if devices_response.status_code != 200:
+        return {}
+        
+    devices_data = devices_response.json()
+    devices = devices_data.get('devices', [])
+    
+    # Build device mapping: IP -> attachment points
+    device_mapping = {}
+    for device in devices:
+        ipv4_addresses = device.get('ipv4', [])
+        attachment_points = device.get('attachmentPoint', [])
+        
+        for ip in ipv4_addresses:
+            if ip and ip != '0.0.0.0':
+                device_mapping[ip] = attachment_points
+    
+    # Get switches  
+    switches_response = requests.get(f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/controller/switches/json')
+    if switches_response.status_code != 200:
+        return {}
+        
+    switches = switches_response.json()
+    
+    # Build port statistics lookup (same as analytics function)
+    switch_port_stats = {}
+    for switch in switches:
+        switch_id = switch['switchDPID']
+        port_url = f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/port/json'
+        port_response = requests.get(port_url)
+        
+        if port_response.status_code == 200:
+            port_data = port_response.json()
+            ports = port_data.get('port_reply', [{}])[0].get('port', [])
+            
+            for port in ports:
+                port_number = port.get('port_number')
+                if port_number != 'local' and port_number is not None:
+                    rx_packets = int(port.get('receive_packets', 0))
+                    tx_packets = int(port.get('transmit_packets', 0))
+                    rx_bytes = int(port.get('receive_bytes', 0))
+                    tx_bytes = int(port.get('transmit_bytes', 0))
+                    
+                    switch_port_key = f"{switch_id}:{port_number}"
+                    switch_port_stats[switch_port_key] = {
+                        'total_packets': rx_packets + tx_packets,
+                        'total_bytes': rx_bytes + tx_bytes,
+                        'rx_packets': rx_packets,
+                        'tx_packets': tx_packets,
+                        'rx_bytes': rx_bytes,
+                        'tx_bytes': tx_bytes
+                    }
+    
+    # Map devices to their port traffic
+    device_traffic = {}
+    for ip, attachment_points in device_mapping.items():
+        total_packets = 0
+        total_bytes = 0
+        protocols = set()
+        
+        # Use only the PRIMARY attachment point to avoid double-counting
+        # (devices may appear on multiple switches due to network topology/learning)
+        if attachment_points:
+            primary_attachment = attachment_points[0]  # Use first (primary) attachment point
+            switch_dpid = primary_attachment.get('switch', '') or primary_attachment.get('switchDPID', '')
+            port_num = str(primary_attachment.get('port', ''))
+            
+            switch_port_key = f"{switch_dpid}:{port_num}"
+            if switch_port_key in switch_port_stats:
+                port_stats = switch_port_stats[switch_port_key]
+                # Use RX packets/bytes as traffic "received from device" (device as source)
+                # This measures actual traffic generated BY the host, not TO the host
+                total_packets = port_stats['rx_packets']
+                total_bytes = port_stats['rx_bytes']
+        
+        # Initialize even devices without attachment points (with 0 traffic)
+        device_traffic[ip] = {
+            'packets': total_packets,
+            'bytes': total_bytes,
+            'protocols': protocols  # Protocol detection would need flow analysis
+        }
+    
+    return device_traffic
 
 
 # Suspicious activity monitoring function:
@@ -338,57 +414,13 @@ def suspicious_activity_monitor():
         try:
             print("\n[Security] Checking for suspicious activity...")
             
-            # Get all switches to analyze flows
-            switches_response = requests.get(
-                f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/controller/switches/json')
+            # Get current traffic snapshot using device-to-port mapping
+            current_traffic = get_device_traffic_snapshot()
             
-            if switches_response.status_code != 200:
+            if not current_traffic:
+                print("[Security] Failed to get traffic data, retrying...")
                 time.sleep(MONITORING_INTERVAL)
                 continue
-                
-            switches = switches_response.json()
-            
-            # Track current traffic per user
-            current_traffic = {}  # {ip: {'bytes': 0, 'packets': 0, 'protocols': set()}}
-            
-            # Analyze flows from all switches
-            for switch in switches:
-                switch_id = switch['switchDPID']
-                flow_response = requests.get(
-                    f'{FLOODLIGHT_CONTROLLER_URL}/wm/core/switch/{switch_id}/flow/json')
-                
-                if flow_response.status_code == 200:
-                    flow_data = flow_response.json()
-                    flows = flow_data.get('flows', [])
-                    
-                    for flow in flows:
-                        match = flow.get('match', {})
-                        src_ip = match.get('nw-src', '')
-                        dst_port = match.get('tp-dst', '')
-                        byte_count = int(flow.get('byteCount', 0))
-                        packet_count = int(flow.get('packetCount', 0))
-                        
-                        # Skip if no source IP
-                        if not src_ip or src_ip == '0.0.0.0/0':
-                            continue
-                            
-                        # Extract IP from CIDR if needed
-                        if '/' in src_ip:
-                            src_ip = src_ip.split('/')[0]
-                        
-                        # Initialize tracking for this IP
-                        if src_ip not in current_traffic:
-                            current_traffic[src_ip] = {'bytes': 0, 'packets': 0, 'protocols': set()}
-                        
-                        # Add traffic
-                        current_traffic[src_ip]['bytes'] += byte_count
-                        current_traffic[src_ip]['packets'] += packet_count
-                        
-                        # Detect protocol from destination port
-                        if dst_port:
-                            protocol = get_protocol_by_port(dst_port)
-                            if protocol:
-                                current_traffic[src_ip]['protocols'].add(protocol)
             
             # Check each user for suspicious activity
             current_time = time.time()
@@ -401,19 +433,33 @@ def suspicious_activity_monitor():
                     # Initialize history if needed
                     if ip not in user_traffic_history:
                         user_traffic_history[ip] = {
-                            'bytes': [],
-                            'packets': [],
-                            'timestamps': [],
-                            'last_check': current_time
+                            'last_bytes': traffic_data['bytes'],
+                            'last_packets': traffic_data['packets'],
+                            'last_check': current_time,
+                            'bytes_history': [],
+                            'packets_history': [],
+                            'timestamps': []
                         }
+                        # Skip rate calculation on first measurement
+                        continue
                     
                     history = user_traffic_history[ip]
                     time_diff = current_time - history['last_check']
                     
-                    # Calculate per-minute rates
+                    # Calculate delta (actual new traffic since last check)
                     if time_diff > 0:
-                        bytes_per_minute = (traffic_data['bytes'] / time_diff) * 60
-                        packets_per_minute = (traffic_data['packets'] / time_diff) * 60
+                        bytes_delta = traffic_data['bytes'] - history['last_bytes']
+                        packets_delta = traffic_data['packets'] - history['last_packets']
+                        
+                        # Handle counter resets (when switch restarts, counters reset to 0)
+                        if bytes_delta < 0:
+                            bytes_delta = traffic_data['bytes']  # Assume full current count is new
+                        if packets_delta < 0:
+                            packets_delta = traffic_data['packets']  # Assume full current count is new
+                        
+                        # Calculate per-minute rates from delta
+                        bytes_per_minute = (bytes_delta / time_diff) * 60
+                        packets_per_minute = (packets_delta / time_diff) * 60
                         
                         # Check traffic thresholds
                         bytes_threshold = TRAFFIC_THRESHOLDS.get('bytes_per_minute', 10485760)  # 10MB default
@@ -471,16 +517,20 @@ def suspicious_activity_monitor():
                                         'protocols': list(used_protocols) if user_role != 'unknown' else []
                                     })
                         
-                        # Update history
-                        history['bytes'].append(bytes_per_minute)
-                        history['packets'].append(packets_per_minute)
-                        history['timestamps'].append(current_time)
+                        # Update history with current values and rates
+                        history['last_bytes'] = traffic_data['bytes']
+                        history['last_packets'] = traffic_data['packets']
                         history['last_check'] = current_time
                         
+                        # Store rate history for trend analysis
+                        history['bytes_history'].append(bytes_per_minute)
+                        history['packets_history'].append(packets_per_minute)
+                        history['timestamps'].append(current_time)
+                        
                         # Keep only last 10 measurements
-                        if len(history['bytes']) > 10:
-                            history['bytes'] = history['bytes'][-10:]
-                            history['packets'] = history['packets'][-10:]
+                        if len(history['bytes_history']) > 10:
+                            history['bytes_history'] = history['bytes_history'][-10:]
+                            history['packets_history'] = history['packets_history'][-10:]
                             history['timestamps'] = history['timestamps'][-10:]
                 
                 # Save history to file after processing all users

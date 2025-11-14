@@ -6,42 +6,6 @@
     "description": ""
   },
   {
-    "ip": "10.0.0.10",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
-    "ip": "10.0.0.11",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
-    "ip": "10.0.0.12",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
-    "ip": "10.0.0.13",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
-    "ip": "10.0.0.14",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
-    "ip": "10.0.0.15",
-    "role": "guest",
-    "hostname": "default",
-    "description": ""
-  },
-  {
     "ip": "10.0.0.2",
     "role": "guest",
     "hostname": "default",

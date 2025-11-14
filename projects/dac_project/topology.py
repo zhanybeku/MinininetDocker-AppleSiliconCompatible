@@ -32,7 +32,7 @@ def topo():
     )
 
     # Using the same topology as in PA2, but only one controller:
-    num_blocks = 5
+    num_blocks = 3
     switches_per_block = 3
     hosts_per_block = 3
 

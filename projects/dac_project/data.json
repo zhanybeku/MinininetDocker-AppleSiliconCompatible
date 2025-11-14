@@ -28,7 +28,7 @@
     }
   },
   "time_policies": {
-    "business_hours": {"start": 8, "end": 18},
+    "business_hours": {"start": 8, "end": 22},
     "time_blocked_protocols": ["SSH", "RDP", "FTP", "Telnet"]
   },
   "monitoring": {
