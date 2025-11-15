@@ -4,11 +4,11 @@
   "floodlight_controller_port": 6653,
   "utc_timezone": 5,
   "protocols": {
-    "SSH": {"id": "6", "port": "22", "name": "SSH", "description": "Remote management of servers/switches"},
-    "RDP": {"id": "6", "port": "3389", "name": "RDP", "description": "Windows remote access"},
-    "FTP": {"id": "6", "port": "21", "name": "FTP", "description": "File transfer"},
-    "HTTP": {"id": "6", "port": "80", "name": "HTTP", "description": "Web access"},
-    "HTTPS": {"id": "6", "port": "443", "name": "HTTPS", "description": "Secure web access"}
+    "SSH": {"id": "TCP", "port": "22", "name": "SSH", "description": "Remote management of servers/switches"},
+    "RDP": {"id": "TCP", "port": "3389", "name": "RDP", "description": "Windows remote access"},
+    "FTP": {"id": "TCP", "port": "21", "name": "FTP", "description": "File transfer"},
+    "HTTP": {"id": "TCP", "port": "80", "name": "HTTP", "description": "Web access"},
+    "HTTPS": {"id": "TCP", "port": "443", "name": "HTTPS", "description": "Secure web access"}
   },
   "roles": {
     "admin": {
@@ -34,7 +34,7 @@
   "monitoring": {
     "traffic_thresholds": {
       "bytes_per_minute": 10485760,
-      "packets_per_minute": 10000,
+      "packets_per_minute": 1000,
       "alert_on_exceed": true
     },
     "check_interval_seconds": 30

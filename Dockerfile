@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
     iproute2 \
     iputils-ping \
     iperf \
+    telnet \
     openvswitch-switch \
     openvswitch-common \
     sudo \

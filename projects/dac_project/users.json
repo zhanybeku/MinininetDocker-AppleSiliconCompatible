@@ -1,13 +1,13 @@
 [
   {
     "ip": "10.0.0.1",
-    "role": "guest",
+    "role": "admin",
     "hostname": "default",
     "description": ""
   },
   {
     "ip": "10.0.0.2",
-    "role": "guest",
+    "role": "employee",
     "hostname": "default",
     "description": ""
   },
@@ -19,13 +19,13 @@
   },
   {
     "ip": "10.0.0.4",
-    "role": "guest",
+    "role": "admin",
     "hostname": "default",
     "description": ""
   },
   {
     "ip": "10.0.0.5",
-    "role": "guest",
+    "role": "employee",
     "hostname": "default",
     "description": ""
   },
@@ -37,13 +37,13 @@
   },
   {
     "ip": "10.0.0.7",
-    "role": "guest",
+    "role": "admin",
     "hostname": "default",
     "description": ""
   },
   {
     "ip": "10.0.0.8",
-    "role": "guest",
+    "role": "employee",
     "hostname": "default",
     "description": ""
   },
